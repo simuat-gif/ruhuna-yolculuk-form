@@ -51,8 +51,7 @@ app.innerHTML=html;
 const form=document.getElementById('form'), status=document.getElementById('status');
 function pack(){const fd=new FormData(form);return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
 function code(){return 'RYC1:'+b64e(JSON.stringify(pack()))}
-form.addEventListener('submit',async e=>{e.preventDefault();const msg='Ruhuna Yolculuk – Ön Değerlendirme tamamlandı.\n\n'+code();try{if(navigator.share){await navigator.share({text:msg});status.textContent='Paylaşım ekranı açıldı.';status.className='status ok';return}}catch(_){}
-const phone=(p.advisorPhone||'').replace(/\D/g,'');location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg)});
+form.addEventListener('submit',async e=>{e.preventDefault();const msg='Ruhuna Yolculuk – Ön Değerlendirme tamamlandı.\n\n'+code();const phone=(p.advisorPhone||'').replace(/\D/g,'');if(phone){location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg);return}try{if(navigator.share){await navigator.share({text:msg});status.textContent='Paylaşım ekranı açıldı.';status.className='status ok';return}}catch(_){}location.href='https://wa.me/?text='+encodeURIComponent(msg)});
 document.getElementById('copyBtn').addEventListener('click',async()=>{await navigator.clipboard.writeText(code());status.textContent='Cevap kodu kopyalandı.';status.className='status ok'});
 })();
 </script>
