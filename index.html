@@ -25,15 +25,54 @@ button.secondary{margin-top:9px;background:#fff;color:var(--accent);border:1px s
 <div id="app"></div>
 </div>
 <script>
-(function(){
+(async function(){
 const app=document.getElementById('app');
 const enc=new TextEncoder(), dec=new TextDecoder();
-function b64e(s){const bytes=enc.encode(s);let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
-function b64d(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return dec.decode(Uint8Array.from(bin,c=>c.charCodeAt(0)))}
+function b64eBytes(bytes){let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function b64e(s){return b64eBytes(enc.encode(s))}
+function b64bytes(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return Uint8Array.from(bin,c=>c.charCodeAt(0))}
+function b64d(s){return dec.decode(b64bytes(s))}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function payload(){let h=location.hash.slice(1);if(!h)return null;if(h.startsWith('p='))h=h.slice(2);try{return JSON.parse(b64d(h))}catch(e){return null}}
-const p=payload();
-if(!p||!Array.isArray(p.questions)){app.innerHTML='<div class="card empty"><h2>Protokol bağlantısı bekleniyor</h2><p>Bu sayfa Ruhuna Yolculuk masaüstü programının oluşturduğu danışana özel bağlantılarla açılır.</p><p class="tiny">Protokol verisi URL\'nin # bölümünde tarayıcıda işlenir.</p></div>';return}
+
+async function loadPayload(){
+  let h=location.hash.slice(1);
+  if(!h) return null;
+  if(h.startsWith('r=')){
+    const spec=h.slice(2);
+    const dot=spec.indexOf('.');
+    if(dot<1) throw new Error('Kısa protokol bağlantısı eksik.');
+    const id=spec.slice(0,dot).replace(/[^A-Fa-f0-9]/g,'');
+    const keyText=spec.slice(dot+1);
+    if(!id||!keyText) throw new Error('Kısa protokol bağlantısı geçersiz.');
+    const rawUrl='https://raw.githubusercontent.com/simuat-gif/ruhuna-yolculuk-form/main/protocols/'+encodeURIComponent(id)+'.json';
+    const res=await fetch(rawUrl,{cache:'no-store'});
+    if(!res.ok) throw new Error('Protokol henüz yayınlanmamış veya bulunamadı. Birkaç saniye sonra tekrar deneyin.');
+    const env=await res.json();
+    if(+env.v!==2||env.alg!=='A256GCM') throw new Error('Protokol dosyası desteklenmiyor.');
+    const key=await crypto.subtle.importKey('raw',b64bytes(keyText),{name:'AES-GCM'},false,['decrypt']);
+    let plain;
+    try{
+      plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64bytes(env.iv)},key,b64bytes(env.data));
+    }catch(e){throw new Error('Protokol güvenlik anahtarı doğrulanamadı.');}
+    return JSON.parse(dec.decode(new Uint8Array(plain)));
+  }
+  if(h.startsWith('p=')) h=h.slice(2);
+  try{return JSON.parse(b64d(h))}catch(e){return null}
+}
+
+function errorCard(title,text){
+  app.innerHTML='<div class="card empty"><h2>'+esc(title)+'</h2><p>'+esc(text)+'</p><p class="tiny">Bağlantının tamamını WhatsApp mesajından yeniden açmayı deneyebilirsiniz.</p></div>';
+}
+let p;
+try{
+  app.innerHTML='<div class="card empty"><h2>Protokol açılıyor…</h2><p>Lütfen birkaç saniye bekleyin.</p></div>';
+  p=await loadPayload();
+}catch(err){
+  errorCard('Protokol açılamadı',err.message||String(err));return;
+}
+if(!p||!Array.isArray(p.questions)){
+  errorCard('Protokol bağlantısı bekleniyor','Bu sayfa Ruhuna Yolculuk masaüstü programının oluşturduğu danışana özel bağlantılarla açılır.');return;
+}
 const title=p.title||'Size Özel Ön Değerlendirme';
 const intro=p.intro||'Danışmanınızın sizi daha iyi tanıyabilmesi için aşağıdaki soruları mümkün olduğunca açık ve doğal şekilde cevaplayınız.';
 let html='<div class="card intro"><h2>'+esc(title)+'</h2><p>'+esc(intro)+'</p></div><form id="form">';
@@ -51,8 +90,19 @@ app.innerHTML=html;
 const form=document.getElementById('form'), status=document.getElementById('status');
 function pack(){const fd=new FormData(form);return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
 function code(){return 'RYC1:'+b64e(JSON.stringify(pack()))}
-form.addEventListener('submit',async e=>{e.preventDefault();const msg='Ruhuna Yolculuk – Ön Değerlendirme tamamlandı.\n\n'+code();const phone=(p.advisorPhone||'').replace(/\D/g,'');if(phone){location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg);return}try{if(navigator.share){await navigator.share({text:msg});status.textContent='Paylaşım ekranı açıldı.';status.className='status ok';return}}catch(_){}location.href='https://wa.me/?text='+encodeURIComponent(msg)});
-document.getElementById('copyBtn').addEventListener('click',async()=>{await navigator.clipboard.writeText(code());status.textContent='Cevap kodu kopyalandı.';status.className='status ok'});
+form.addEventListener('submit',async e=>{
+ e.preventDefault();
+ const msg='Ruhuna Yolculuk – Ön Değerlendirme tamamlandı.\n\n'+code();
+ const phone=(p.advisorPhone||'').replace(/\D/g,'');
+ if(phone){location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg);return}
+ try{if(navigator.share){await navigator.share({text:msg});status.textContent='Paylaşım ekranı açıldı.';status.className='status ok';return}}catch(_){}
+ location.href='https://wa.me/?text='+encodeURIComponent(msg)
+});
+document.getElementById('copyBtn').addEventListener('click',async()=>{
+ await navigator.clipboard.writeText(code());
+ status.textContent='Cevap kodu kopyalandı.';
+ status.className='status ok';
+});
 })();
 </script>
 </body>
