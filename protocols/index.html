@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruhuna Yolculuk – Ön Değerlendirme</title>
+<style>
+:root{--bg:#f6f3ee;--card:#fff;--ink:#222;--muted:#6e6a65;--accent:#6f5b45;--line:#e8e1d8;--ok:#2f6f4e}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--ink)}
+.wrap{max-width:760px;margin:auto;padding:24px 16px 48px}.brand{text-align:center;margin:12px 0 24px}.brand h1{font-size:30px;margin:0 0 4px}.brand p{margin:0;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 4px 18px rgba(0,0,0,.04)}
+.intro h2{margin:0 0 8px;font-size:22px}.intro p{margin:0;color:var(--muted);line-height:1.6}.qno{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.qtext{font-size:18px;font-weight:700;margin:8px 0 14px;line-height:1.45}textarea,input[type=text]{width:100%;border:1px solid #d9d1c7;border-radius:12px;padding:13px 14px;font:inherit;background:#fff}
+textarea{min-height:110px;resize:vertical}.choices{display:grid;gap:10px}.choice{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);padding:12px;border-radius:12px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.scale label{border:1px solid var(--line);padding:12px 6px;text-align:center;border-radius:10px}
+.actions{position:sticky;bottom:0;padding:14px 0;background:linear-gradient(180deg,rgba(246,243,238,0),var(--bg) 30%)}
+button{width:100%;border:0;border-radius:14px;padding:15px 18px;font-size:16px;font-weight:800;cursor:pointer;background:var(--accent);color:#fff}
+button.secondary{margin-top:9px;background:#fff;color:var(--accent);border:1px solid var(--line)}.status{font-size:14px;color:var(--muted);margin-top:10px;text-align:center}.ok{color:var(--ok)}
+.empty{text-align:center;padding:32px}.tiny{font-size:12px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="brand"><h1>Ruhuna Yolculuk</h1><p>İLGEN Manevî Danışmanlık Sistemi</p></div>
+<div id="app"></div>
+</div>
+<script>
+(async function(){
+const app=document.getElementById('app');
+const enc=new TextEncoder(), dec=new TextDecoder();
+let activeKeyBytes=null;
+function b64eBytes(bytes){let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function b64e(s){return b64eBytes(enc.encode(s))}
+function b64bytes(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return Uint8Array.from(bin,c=>c.charCodeAt(0))}
+function b64d(s){return dec.decode(b64bytes(s))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+async function loadPayload(){
+  let h=location.hash.slice(1);
+  if(!h) return null;
+  if(h.startsWith('r=')){
+    const spec=h.slice(2);
+    const dot=spec.indexOf('.');
+    if(dot<1) throw new Error('Kısa protokol bağlantısı eksik.');
+    const id=spec.slice(0,dot).replace(/[^A-Fa-f0-9]/g,'');
+    const keyText=spec.slice(dot+1);
+    if(!id||!keyText) throw new Error('Kısa protokol bağlantısı geçersiz.');
+    const rawUrl='https://raw.githubusercontent.com/simuat-gif/ruhuna-yolculuk-form/main/protocols/'+encodeURIComponent(id)+'.json';
+    const res=await fetch(rawUrl,{cache:'no-store'});
+    if(!res.ok) throw new Error('Protokol henüz yayınlanmamış veya bulunamadı. Birkaç saniye sonra tekrar deneyin.');
+    const env=await res.json();
+    if(+env.v!==2||env.alg!=='A256GCM') throw new Error('Protokol dosyası desteklenmiyor.');
+    activeKeyBytes=b64bytes(keyText);
+    const key=await crypto.subtle.importKey('raw',activeKeyBytes,{name:'AES-GCM'},false,['decrypt']);
+    let plain;
+    try{
+      plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64bytes(env.iv)},key,b64bytes(env.data));
+    }catch(e){throw new Error('Protokol güvenlik anahtarı doğrulanamadı.');}
+    return JSON.parse(dec.decode(new Uint8Array(plain)));
+  }
+  if(h.startsWith('p=')) h=h.slice(2);
+  try{return JSON.parse(b64d(h))}catch(e){return null}
+}
+
+function errorCard(title,text){
+  app.innerHTML='<div class="card empty"><h2>'+esc(title)+'</h2><p>'+esc(text)+'</p><p class="tiny">Bağlantının tamamını WhatsApp mesajından yeniden açmayı deneyebilirsiniz.</p></div>';
+}
+let p;
+try{
+  app.innerHTML='<div class="card empty"><h2>Protokol açılıyor…</h2><p>Lütfen birkaç saniye bekleyin.</p></div>';
+  p=await loadPayload();
+}catch(err){
+  errorCard('Protokol açılamadı',err.message||String(err));return;
+}
+if(!p||!Array.isArray(p.questions)){
+  errorCard('Protokol bağlantısı bekleniyor','Bu sayfa Ruhuna Yolculuk masaüstü programının oluşturduğu danışana özel bağlantılarla açılır.');return;
+}
+const title=p.title||'Size Özel Ön Değerlendirme';
+const intro=p.intro||'Danışmanınızın sizi daha iyi tanıyabilmesi için aşağıdaki soruları mümkün olduğunca açık ve doğal şekilde cevaplayınız.';
+let html='<div class="card intro"><h2>'+esc(title)+'</h2><p>'+esc(intro)+'</p></div><form id="form">';
+p.questions.forEach((q,i)=>{
+ const id=String(q.id||('q'+(i+1))), t=q.type||'long'; let field='';
+ if(t==='short') field='<input type="text" name="'+esc(id)+'">';
+ else if(t==='yesno') field='<div class="choices"><label class="choice"><input type="radio" name="'+esc(id)+'" value="Evet" required> Evet</label><label class="choice"><input type="radio" name="'+esc(id)+'" value="Hayır" required> Hayır</label></div>';
+ else if(t==='scale') field='<div class="scale">'+[1,2,3,4,5].map(n=>'<label><input type="radio" name="'+esc(id)+'" value="'+n+'" required><br>'+n+'</label>').join('')+'</div>';
+ else if(t==='choice'&&Array.isArray(q.options)) field='<div class="choices">'+q.options.map(o=>'<label class="choice"><input type="radio" name="'+esc(id)+'" value="'+esc(o)+'" required> '+esc(o)+'</label>').join('')+'</div>';
+ else field='<textarea name="'+esc(id)+'"></textarea>';
+ html+='<div class="card"><div class="qno">SORU '+(i+1)+'</div><div class="qtext">'+esc(q.text||'')+'</div>'+field+'</div>';
+});
+html+='<div class="actions"><button type="submit">Paylaş ve Danışmanımı Seç</button><button type="button" class="secondary" id="downloadBtn">Cevap Dosyasını İndir</button><div class="status" id="status"></div></div></form>';
+app.innerHTML=html;
+const form=document.getElementById('form'), status=document.getElementById('status');
+function pack(){const fd=new FormData(form);return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
+async function makeRYCFile(){
+ if(!activeKeyBytes) throw new Error('Cevap dosyası güvenlik anahtarı bulunamadı.');
+ const key=await crypto.subtle.importKey('raw',activeKeyBytes,{name:'AES-GCM'},false,['encrypt']);
+ const iv=crypto.getRandomValues(new Uint8Array(12));
+ const plain=enc.encode(JSON.stringify(pack()));
+ const cipher=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
+ const env={v:1,alg:'A256GCM',protocolId:p.protocolId||'',iv:b64eBytes(iv),data:b64eBytes(cipher)};
+ const blob=new Blob([JSON.stringify(env)],{type:'application/vnd.ruhunayolculuk.response+json'});
+ const safeId=String(p.protocolId||'cevap').replace(/[^A-Za-z0-9_-]/g,'').slice(0,18)||'cevap';
+ return new File([blob],'RuhunaYolculuk_'+safeId+'.ryc',{type:'application/vnd.ruhunayolculuk.response+json'});
+}
+async function downloadFile(file){
+ const u=URL.createObjectURL(file);const a=document.createElement('a');a.href=u;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);
+}
+form.addEventListener('submit',async e=>{
+ e.preventDefault();status.textContent='Cevap dosyası hazırlanıyor…';
+ try{
+   const file=await makeRYCFile();
+   if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+     await navigator.share({files:[file],title:'Ruhuna Yolculuk – Ön Değerlendirme',text:'Ön değerlendirme cevap dosyam ektedir. Lütfen WhatsApp\'tan danışmanımı seçerek gönderiyorum.'});
+     status.textContent='Paylaşım ekranı açıldı. WhatsApp’ı seçin ve danışmanınızı kişi listesinden seçerek gönderin.';status.className='status ok';return;
+   }
+   await downloadFile(file);
+   status.textContent='Cevap dosyası indirildi. WhatsApp’ta danışmanınıza dosya olarak ekleyin.';status.className='status ok';
+ }catch(err){status.textContent=err.message||String(err);status.className='status';}
+});
+document.getElementById('downloadBtn').addEventListener('click',async()=>{
+ try{const file=await makeRYCFile();await downloadFile(file);status.textContent='Cevap dosyası indirildi.';status.className='status ok'}catch(err){status.textContent=err.message||String(err)}
+});
+})();
+</script>
+</body>
+</html>
