@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruhuna Yolculuk – Ön Değerlendirme</title>
+<style>
+:root{--bg:#f6f3ee;--card:#fff;--ink:#222;--muted:#6e6a65;--accent:#6f5b45;--line:#e8e1d8;--ok:#2f6f4e}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--ink)}
+.wrap{max-width:760px;margin:auto;padding:24px 16px 48px}.brand{text-align:center;margin:12px 0 24px}.brand h1{font-size:30px;margin:0 0 4px}.brand p{margin:0;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;margin:14px 0;box-shadow:0 4px 18px rgba(0,0,0,.04)}
+.intro h2{margin:0 0 8px;font-size:22px}.intro p{margin:0;color:var(--muted);line-height:1.6}.qno{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.qtext{font-size:18px;font-weight:700;margin:8px 0 14px;line-height:1.45}textarea,input[type=text]{width:100%;border:1px solid #d9d1c7;border-radius:12px;padding:13px 14px;font:inherit;background:#fff}
+textarea{min-height:110px;resize:vertical}.choices{display:grid;gap:10px}.choice{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);padding:12px;border-radius:12px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.scale label{border:1px solid var(--line);padding:12px 6px;text-align:center;border-radius:10px}
+.actions{position:sticky;bottom:0;padding:14px 0;background:linear-gradient(180deg,rgba(246,243,238,0),var(--bg) 30%)}
+button{width:100%;border:0;border-radius:14px;padding:15px 18px;font-size:16px;font-weight:800;cursor:pointer;background:var(--accent);color:#fff}
+button.secondary{margin-top:9px;background:#fff;color:var(--accent);border:1px solid var(--line)}.status{font-size:14px;color:var(--muted);margin-top:10px;text-align:center}.ok{color:var(--ok)}
+.empty{text-align:center;padding:32px}.tiny{font-size:12px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="brand"><h1>Ruhuna Yolculuk</h1><p>İLGEN Manevî Danışmanlık Sistemi</p></div>
+<div id="app"></div>
+</div>
+<script>
+(function(){
+const app=document.getElementById('app');
+const enc=new TextEncoder(), dec=new TextDecoder();
+function b64e(s){const bytes=enc.encode(s);let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function b64d(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';const bin=atob(s);return dec.decode(Uint8Array.from(bin,c=>c.charCodeAt(0)))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function payload(){let h=location.hash.slice(1);if(!h)return null;if(h.startsWith('p='))h=h.slice(2);try{return JSON.parse(b64d(h))}catch(e){return null}}
+const p=payload();
+if(!p||!Array.isArray(p.questions)){app.innerHTML='<div class="card empty"><h2>Protokol bağlantısı bekleniyor</h2><p>Bu sayfa Ruhuna Yolculuk masaüstü programının oluşturduğu danışana özel bağlantılarla açılır.</p><p class="tiny">Protokol verisi URL\'nin # bölümünde tarayıcıda işlenir.</p></div>';return}
+const title=p.title||'Size Özel Ön Değerlendirme';
+const intro=p.intro||'Danışmanınızın sizi daha iyi tanıyabilmesi için aşağıdaki soruları mümkün olduğunca açık ve doğal şekilde cevaplayınız.';
+let html='<div class="card intro"><h2>'+esc(title)+'</h2><p>'+esc(intro)+'</p></div><form id="form">';
+p.questions.forEach((q,i)=>{
+ const id=String(q.id||('q'+(i+1))), t=q.type||'long'; let field='';
+ if(t==='short') field='<input type="text" name="'+esc(id)+'">';
+ else if(t==='yesno') field='<div class="choices"><label class="choice"><input type="radio" name="'+esc(id)+'" value="Evet" required> Evet</label><label class="choice"><input type="radio" name="'+esc(id)+'" value="Hayır" required> Hayır</label></div>';
+ else if(t==='scale') field='<div class="scale">'+[1,2,3,4,5].map(n=>'<label><input type="radio" name="'+esc(id)+'" value="'+n+'" required><br>'+n+'</label>').join('')+'</div>';
+ else if(t==='choice'&&Array.isArray(q.options)) field='<div class="choices">'+q.options.map(o=>'<label class="choice"><input type="radio" name="'+esc(id)+'" value="'+esc(o)+'" required> '+esc(o)+'</label>').join('')+'</div>';
+ else field='<textarea name="'+esc(id)+'"></textarea>';
+ html+='<div class="card"><div class="qno">SORU '+(i+1)+'</div><div class="qtext">'+esc(q.text||'')+'</div>'+field+'</div>';
+});
+html+='<div class="actions"><button type="submit">Danışmanıma Gönder</button><button type="button" class="secondary" id="copyBtn">Cevap Kodunu Kopyala</button><div class="status" id="status"></div></div></form>';
+app.innerHTML=html;
+const form=document.getElementById('form'), status=document.getElementById('status');
+function pack(){const fd=new FormData(form);return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
+function code(){return 'RYC1:'+b64e(JSON.stringify(pack()))}
+form.addEventListener('submit',async e=>{e.preventDefault();const msg='Ruhuna Yolculuk – Ön Değerlendirme tamamlandı.\n\n'+code();try{if(navigator.share){await navigator.share({text:msg});status.textContent='Paylaşım ekranı açıldı.';status.className='status ok';return}}catch(_){}
+const phone=(p.advisorPhone||'').replace(/\D/g,'');location.href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg)});
+document.getElementById('copyBtn').addEventListener('click',async()=>{await navigator.clipboard.writeText(code());status.textContent='Cevap kodu kopyalandı.';status.className='status ok'});
+})();
+</script>
+</body>
+</html>
