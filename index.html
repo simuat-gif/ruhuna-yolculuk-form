@@ -76,21 +76,22 @@ if(!p||!Array.isArray(p.questions)){
   errorCard('Protokol bağlantısı bekleniyor','Bu sayfa Ruhuna Yolculuk masaüstü programının oluşturduğu danışana özel bağlantılarla açılır.');return;
 }
 const title=p.title||'Size Özel Ön Değerlendirme';
-const intro=p.intro||'Danışmanınızın sizi daha iyi tanıyabilmesi için aşağıdaki soruları mümkün olduğunca açık ve doğal şekilde cevaplayınız.';
+const intro=p.intro||'Danışmanınızın sizi daha iyi tanıyabilmesi için uygun gördüğünüz soruları açık ve doğal şekilde cevaplayınız. İsteğe bağlı soruları boş bırakabilirsiniz.';
 let html='<div class="card intro"><h2>'+esc(title)+'</h2><p>'+esc(intro)+'</p></div><form id="form">';
 p.questions.forEach((q,i)=>{
  const id=String(q.id||('q'+(i+1))), t=q.type||'long'; let field='';
  if(t==='short') field='<input type="text" name="'+esc(id)+'">';
- else if(t==='yesno') field='<div class="choices"><label class="choice"><input type="radio" name="'+esc(id)+'" value="Evet" required> Evet</label><label class="choice"><input type="radio" name="'+esc(id)+'" value="Hayır" required> Hayır</label></div>';
- else if(t==='scale') field='<div class="scale">'+[1,2,3,4,5].map(n=>'<label><input type="radio" name="'+esc(id)+'" value="'+n+'" required><br>'+n+'</label>').join('')+'</div>';
- else if(t==='choice'&&Array.isArray(q.options)) field='<div class="choices">'+q.options.map(o=>'<label class="choice"><input type="radio" name="'+esc(id)+'" value="'+esc(o)+'" required> '+esc(o)+'</label>').join('')+'</div>';
+ else if(t==='yesno') field='<div class="choices"><label class="choice"><input type="radio" name="'+esc(id)+'" value="Evet" '+(q.required?'required':'')+' > Evet</label><label class="choice"><input type="radio" name="'+esc(id)+'" value="Hayır" '+(q.required?'required':'')+' > Hayır</label></div>';
+ else if(t==='scale') field='<div class="scale">'+[1,2,3,4,5].map(n=>'<label><input type="radio" name="'+esc(id)+'" value="'+n+'" '+(q.required?'required':'')+'><br>'+n+'</label>').join('')+'</div>';
+ else if(t==='choice'&&Array.isArray(q.options)) field='<div class="choices">'+q.options.map(o=>'<label class="choice"><input type="radio" name="'+esc(id)+'" value="'+esc(o)+'" '+(q.required?'required':'')+'> '+esc(o)+'</label>').join('')+'</div>';
  else field='<textarea name="'+esc(id)+'"></textarea>';
- html+='<div class="card"><div class="qno">SORU '+(i+1)+'</div><div class="qtext">'+esc(q.text||'')+'</div>'+field+'</div>';
+ html+='<div class="card"><div class="qno">SORU '+(i+1)+(q.required?' · ZORUNLU':' · İSTEĞE BAĞLI')+'</div><div class="qtext">'+esc(q.text||'')+'</div>'+field+'</div>';
 });
-html+='<div class="actions"><button type="submit">Danışmanıma Gönder</button><button type="button" class="secondary" id="downloadBtn">Cevap Dosyasını İndir</button><div class="status" id="status"></div></div></form>';
+html+='<div class="actions"><button type="submit">Paylaş ve Danışmanımı Seç</button><button type="button" class="secondary" id="downloadBtn">Cevap Dosyasını İndir</button><div class="status" id="status"></div></div></form>';
 app.innerHTML=html;
 const form=document.getElementById('form'), status=document.getElementById('status');
-function pack(){const fd=new FormData(form);return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
+function responseStats(){const fd=new FormData(form);let answered=0,blank=0,requiredBlank=0;for(const q of p.questions){const v=fd.get(q.id)||'';if(String(v).trim())answered++;else{blank++;if(q.required)requiredBlank++;}}return {answered,blank,requiredBlank}}
+function pack(){const fd=new FormData(form);const st=responseStats();return {v:1,protocolId:p.protocolId||'',createdAt:new Date().toISOString(),stats:st,answers:p.questions.map(q=>({id:q.id||'',answer:fd.get(q.id)||''}))}}
 async function makeRYCFile(){
  if(!activeKeyBytes) throw new Error('Cevap dosyası güvenlik anahtarı bulunamadı.');
  const key=await crypto.subtle.importKey('raw',activeKeyBytes,{name:'AES-GCM'},false,['encrypt']);
@@ -106,16 +107,23 @@ async function downloadFile(file){
  const u=URL.createObjectURL(file);const a=document.createElement('a');a.href=u;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);
 }
 form.addEventListener('submit',async e=>{
- e.preventDefault();status.textContent='Cevap dosyası hazırlanıyor…';
+ e.preventDefault();
+ const stats=responseStats();
+ if(stats.requiredBlank){status.textContent='Zorunlu işaretlenmiş '+stats.requiredBlank+' soru henüz cevaplanmadı.';status.className='status';return;}
+ if(stats.blank){const ok=confirm(stats.blank+' soru boş bırakıldı. Yine de cevap dosyasını hazırlayıp paylaşmak istiyor musunuz?');if(!ok)return;}
+ status.textContent='Cevap dosyası hazırlanıyor…';status.className='status';
+ let file;
+ try{file=await makeRYCFile()}catch(err){status.textContent=err.message||String(err);return;}
+ status.textContent='Dosya hazır. Telefonun paylaşım ekranı açılmaya çalışılıyor…';
  try{
-   const file=await makeRYCFile();
    if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
      await navigator.share({files:[file],title:'Ruhuna Yolculuk – Ön Değerlendirme',text:'Ön değerlendirme cevap dosyam ektedir.'});
-     status.textContent='Paylaşım ekranı açıldı. WhatsApp’ı seçip danışmanınıza gönderin.';status.className='status ok';return;
+     status.textContent='Paylaşım tamamlandı veya paylaşım ekranından geri dönüldü. Gerekirse aşağıdaki “Cevap Dosyasını İndir” düğmesini kullanabilirsiniz.';status.className='status ok';return;
    }
-   await downloadFile(file);
-   status.textContent='Cevap dosyası indirildi. WhatsApp’ta danışmanınıza dosya olarak ekleyin.';status.className='status ok';
- }catch(err){status.textContent=err.message||String(err);status.className='status';}
+ }catch(err){
+   status.textContent='Paylaşım ekranı açılamadı. Cevap dosyası şimdi indirilecek; WhatsApp’ta göndereceğiniz kişiyi seçip dosyayı ekleyin.';status.className='status';
+ }
+ try{await downloadFile(file);status.textContent='Cevap dosyası indirildi. WhatsApp’ı açın, göndereceğiniz kişiyi seçin ve bu .ryc dosyasını ekleyin.';status.className='status ok'}catch(err){status.textContent='Paylaşım ve indirme otomatik başlatılamadı. Aşağıdaki “Cevap Dosyasını İndir” düğmesine dokunun.';status.className='status';}
 });
 document.getElementById('downloadBtn').addEventListener('click',async()=>{
  try{const file=await makeRYCFile();await downloadFile(file);status.textContent='Cevap dosyası indirildi.';status.className='status ok'}catch(err){status.textContent=err.message||String(err)}
